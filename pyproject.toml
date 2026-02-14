@@ -1,0 +1,28 @@
+[project]
+name = "rift-engine"
+version = "0.1.0"
+description = "A mechanics-aware League of Legends match simulation engine"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "httpx>=0.25",
+    "beautifulsoup4>=4.12",
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "lightgbm>=4.0",
+    "scikit-learn>=1.3",
+    "python-dotenv>=1.0",
+    "firecrawl-py>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "matplotlib>=3.7",
+    "seaborn>=0.12",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
