@@ -14,6 +14,9 @@ from pydantic import BaseModel
 from pathlib import Path
 
 from engine.simulation import create_initial_state, simulate_match
+from engine.mcts.lane_state import LaneState
+from engine.mcts.tree import run_mcts
+from engine.mcts.explainer import explain_recommendation
 
 app = FastAPI(
     title="Rift Engine",
@@ -23,6 +26,61 @@ app = FastAPI(
 
 
 # ─── Request / Response Models ───
+
+# ─── Patch Decoder Models ───
+
+class PatchDecodeRequest(BaseModel):
+    url: str | None = None  # Optional: decode specific URL. Omit for latest.
+
+class PatchChangeOut(BaseModel):
+    change_type: str
+    target_name: str
+    ability: str = ""
+    description: str = ""
+    roles_affected: list[str] = []
+    impact_score: float = 0.0
+
+class PatchOut(BaseModel):
+    patch_version: str
+    url: str = ""
+    extracted_at: str = ""
+    changes: list[PatchChangeOut] = []
+
+class RoleSummaryOut(BaseModel):
+    role: str
+    patch: str
+    buffs: list[dict] = []
+    nerfs: list[dict] = []
+    item_changes: list[dict] = []
+    system_changes: list[dict] = []
+    tldr: str = ""
+
+
+# ─── MCTS Models ───
+
+class MCTSRequest(BaseModel):
+    state: dict  # LaneState as dict
+    iterations: int = 1000
+    enemy_model: str = "average"  # "average", "optimal", "passive"
+
+class MCTSRecommendation(BaseModel):
+    do_this: str
+    why: str
+    watch_for: str
+    plan_changes_if: str
+    confidence: str
+    next_2_min: str
+    position_advice: str
+    action_scores: dict = {}
+
+class MCTSPlanRequest(BaseModel):
+    state: dict
+    steps: int = 6  # How many 20-sec steps to plan (6 = 2 minutes)
+    enemy_model: str = "average"
+    iterations_per_step: int = 500
+
+
+# ─── Simulation Models ───
 
 class ChampionPick(BaseModel):
     champion_id: str    # e.g. "Jinx"
@@ -109,3 +167,119 @@ async def run_simulation(request: SimulationRequest):
         ],
         champion_reports=result.champion_reports,
     )
+
+
+# ─── Patch Decoder Endpoints ───
+
+@app.get("/patches")
+async def list_patches():
+    """List all decoded patches."""
+    try:
+        from scrapers.patch_decoder import PatchDecoder
+        decoder = PatchDecoder()
+        return decoder.get_stored_patches()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/patches/{version}")
+async def get_patch(version: str):
+    """Get all changes for a specific patch."""
+    try:
+        from scrapers.patch_decoder import PatchDecoder
+        decoder = PatchDecoder()
+        changes = decoder.get_stored_changes(version)
+        return {"patch_version": version, "changes": changes}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/patches/{version}/role/{role}")
+async def get_patch_by_role(version: str, role: str):
+    """Get role-specific patch summary."""
+    try:
+        from scrapers.patch_decoder import PatchDecoder
+        decoder = PatchDecoder()
+        return decoder.summarize_by_role(version, role)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/patches/decode")
+async def decode_patch(request: PatchDecodeRequest = PatchDecodeRequest()):
+    """Trigger a patch note decode. Optionally specify a URL."""
+    try:
+        from scrapers.patch_decoder import PatchDecoder
+        decoder = PatchDecoder()
+        if request.url:
+            result = decoder.decode_url(request.url)
+        else:
+            result = decoder.decode_latest()
+        return {
+            "patch_version": result.version,
+            "url": result.url,
+            "changes_count": len(result.changes),
+            "extracted_at": result.extracted_at,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ─── MCTS Endpoints ───
+
+@app.post("/mcts/recommend", response_model=MCTSRecommendation)
+async def mcts_recommend(request: MCTSRequest):
+    """
+    Get a recommendation for the next 20 seconds.
+    Send your current lane state, get back plain-English advice.
+    """
+    state = LaneState.from_dict(request.state)
+    result = run_mcts(
+        state,
+        iterations=min(request.iterations, 5000),  # Cap at 5000
+        enemy_model=request.enemy_model,
+    )
+    explanation = explain_recommendation(state, result)
+    explanation["action_scores"] = result.action_scores
+    return MCTSRecommendation(**explanation)
+
+
+@app.post("/mcts/plan")
+async def mcts_plan(request: MCTSPlanRequest):
+    """
+    Chain multiple 20-second decisions into a multi-step plan.
+    Returns a sequence of recommendations.
+    """
+    from engine.mcts.simulator import simulate_step
+
+    state = LaneState.from_dict(request.state)
+    steps = min(request.steps, 18)  # Cap at 6 minutes
+    plan = []
+
+    for i in range(steps):
+        result = run_mcts(
+            state,
+            iterations=min(request.iterations_per_step, 2000),
+            enemy_model=request.enemy_model,
+        )
+        explanation = explain_recommendation(state, result)
+        explanation["step"] = i + 1
+        explanation["game_time"] = state.game_time
+        explanation["action_scores"] = result.action_scores
+        plan.append(explanation)
+
+        # Advance state by taking the recommended action
+        state = simulate_step(state, result.best_action, request.enemy_model)
+
+        # Stop if dead
+        if state.my_hp <= 0:
+            plan.append({"step": i + 2, "do_this": "You died — respawning", "game_time": state.game_time})
+            break
+
+    return {"plan": plan, "total_steps": len(plan)}
+
+
+# ─── Static files for UI ───
+ui_dir = Path(__file__).parent.parent / "ui"
+if ui_dir.exists():
+    app.mount("/ui", StaticFiles(directory=str(ui_dir)), name="ui")

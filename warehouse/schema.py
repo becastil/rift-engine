@@ -149,10 +149,54 @@ def create_tables():
         )
     """)
 
+    # ─── PATCHES (Firecrawl Patch Decoder) ───
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS patches (
+            patch_version   TEXT PRIMARY KEY,
+            url             TEXT,
+            extracted_at    TIMESTAMP,
+            raw_json        TEXT
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS patch_changes (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            patch_version   TEXT,
+            change_type     TEXT,
+            target_name     TEXT,
+            ability         TEXT,
+            description     TEXT,
+            roles_affected  TEXT,
+            impact_score    REAL,
+            raw_detail      TEXT,
+            FOREIGN KEY (patch_version) REFERENCES patches(patch_version)
+        )
+    """)
+
     conn.commit()
     conn.close()
     print("All database tables created successfully!")
     print(f"Database location: {DB_PATH}")
+
+
+def create_patch_tables(conn: sqlite3.Connection):
+    """Create just the patch tables (used by patch_decoder without full schema rebuild)."""
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS patches (
+            patch_version TEXT PRIMARY KEY, url TEXT, extracted_at TIMESTAMP, raw_json TEXT
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS patch_changes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, patch_version TEXT, change_type TEXT,
+            target_name TEXT, ability TEXT, description TEXT, roles_affected TEXT,
+            impact_score REAL, raw_detail TEXT,
+            FOREIGN KEY (patch_version) REFERENCES patches(patch_version)
+        )
+    """)
+    conn.commit()
 
 
 def table_counts() -> dict:

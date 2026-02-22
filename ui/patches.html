@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rift Engine — Patch Decoder</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; padding: 20px; }
+        h1 { color: #58a6ff; margin-bottom: 20px; }
+        .tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+        .tab { padding: 8px 16px; border: 1px solid #30363d; border-radius: 6px; cursor: pointer; background: #161b22; color: #8b949e; transition: all 0.2s; }
+        .tab:hover { border-color: #58a6ff; color: #c9d1d9; }
+        .tab.active { background: #1f6feb; color: white; border-color: #1f6feb; }
+        .section { margin-bottom: 24px; }
+        .section h2 { color: #58a6ff; font-size: 18px; margin-bottom: 12px; }
+        .change-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; }
+        .change-card.buff { border-left: 3px solid #3fb950; }
+        .change-card.nerf { border-left: 3px solid #f85149; }
+        .change-card.item { border-left: 3px solid #d29922; }
+        .change-card.system { border-left: 3px solid #8b949e; }
+        .change-name { font-weight: 600; color: #f0f6fc; }
+        .change-ability { color: #8b949e; font-size: 13px; }
+        .change-desc { margin-top: 4px; color: #c9d1d9; }
+        .impact { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+        .impact.positive { background: #1a4d2e; color: #3fb950; }
+        .impact.negative { background: #4d1a1a; color: #f85149; }
+        .impact.neutral { background: #2d333b; color: #8b949e; }
+        .tldr { background: #1c2128; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin-bottom: 20px; font-size: 16px; }
+        .decode-btn { background: #238636; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; margin-bottom: 20px; }
+        .decode-btn:hover { background: #2ea043; }
+        .decode-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .loading { color: #8b949e; font-style: italic; }
+        .patch-select { background: #161b22; color: #c9d1d9; border: 1px solid #30363d; padding: 8px 12px; border-radius: 6px; margin-bottom: 16px; }
+        .empty { color: #484f58; text-align: center; padding: 40px; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Patch Note Decoder</h1>
+
+    <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 20px;">
+        <select id="patchSelect" class="patch-select" onchange="loadPatch()">
+            <option value="">Select a patch...</option>
+        </select>
+        <button class="decode-btn" onclick="decodeLatest()" id="decodeBtn">⚡ Decode Latest Patch</button>
+    </div>
+
+    <div class="tabs" id="roleTabs">
+        <div class="tab active" data-role="all" onclick="filterRole('all')">All</div>
+        <div class="tab" data-role="top" onclick="filterRole('top')">🛡️ Top</div>
+        <div class="tab" data-role="jungle" onclick="filterRole('jungle')">🌿 Jungle</div>
+        <div class="tab" data-role="mid" onclick="filterRole('mid')">🔮 Mid</div>
+        <div class="tab" data-role="adc" onclick="filterRole('adc')">🏹 ADC</div>
+        <div class="tab" data-role="support" onclick="filterRole('support')">💫 Support</div>
+    </div>
+
+    <div id="tldr" class="tldr" style="display:none;"></div>
+    <div id="content"><div class="empty">Select a patch or decode the latest one to get started.</div></div>
+
+    <script>
+        let currentPatch = '';
+        let currentRole = 'all';
+        let allChanges = [];
+
+        async function init() {
+            const res = await fetch('/patches');
+            const patches = await res.json();
+            const select = document.getElementById('patchSelect');
+            if (Array.isArray(patches)) {
+                patches.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.patch_version;
+                    opt.textContent = `Patch ${p.patch_version}`;
+                    select.appendChild(opt);
+                });
+            }
+        }
+
+        async function loadPatch() {
+            const version = document.getElementById('patchSelect').value;
+            if (!version) return;
+            currentPatch = version;
+            
+            if (currentRole !== 'all') {
+                const res = await fetch(`/patches/${version}/role/${currentRole}`);
+                const data = await res.json();
+                renderRoleSummary(data);
+            } else {
+                const res = await fetch(`/patches/${version}`);
+                const data = await res.json();
+                allChanges = data.changes || [];
+                renderAll(allChanges);
+            }
+        }
+
+        async function decodeLatest() {
+            const btn = document.getElementById('decodeBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Decoding...';
+            document.getElementById('content').innerHTML = '<div class="loading">Extracting patch notes with Firecrawl... this may take 30-60 seconds.</div>';
+
+            try {
+                const res = await fetch('/patches/decode', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
+                const data = await res.json();
+                if (data.error) {
+                    document.getElementById('content').innerHTML = `<div class="change-card nerf">Error: ${data.error}</div>`;
+                } else {
+                    // Reload patch list and show the new one
+                    await init();
+                    document.getElementById('patchSelect').value = data.patch_version;
+                    await loadPatch();
+                }
+            } catch (e) {
+                document.getElementById('content').innerHTML = `<div class="change-card nerf">Error: ${e.message}</div>`;
+            }
+            btn.disabled = false;
+            btn.textContent = '⚡ Decode Latest Patch';
+        }
+
+        function filterRole(role) {
+            currentRole = role;
+            document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.role === role));
+            if (currentPatch) loadPatch();
+        }
+
+        function renderAll(changes) {
+            const buffs = changes.filter(c => c.change_type?.includes('buff'));
+            const nerfs = changes.filter(c => c.change_type?.includes('nerf'));
+            const items = changes.filter(c => c.change_type === 'item_change');
+            const system = changes.filter(c => c.change_type === 'system_change');
+            const adjusts = changes.filter(c => c.change_type?.includes('adjust'));
+
+            document.getElementById('tldr').style.display = 'block';
+            document.getElementById('tldr').textContent = `📋 ${buffs.length} buffs, ${nerfs.length} nerfs, ${items.length} item changes, ${system.length} system changes`;
+
+            let html = '';
+            if (buffs.length) html += renderSection('🟢 Champion Buffs', buffs, 'buff');
+            if (nerfs.length) html += renderSection('🔴 Champion Nerfs', nerfs, 'nerf');
+            if (adjusts.length) html += renderSection('🟡 Adjustments', adjusts, 'item');
+            if (items.length) html += renderSection('🔧 Item Changes', items, 'item');
+            if (system.length) html += renderSection('⚙️ System Changes', system, 'system');
+            document.getElementById('content').innerHTML = html || '<div class="empty">No changes found.</div>';
+        }
+
+        function renderRoleSummary(data) {
+            document.getElementById('tldr').style.display = 'block';
+            document.getElementById('tldr').textContent = `${data.role?.toUpperCase()} — ${data.tldr}`;
+
+            let html = '';
+            if (data.buffs?.length) html += renderSection('🟢 Buffs', data.buffs.map(b => ({...b, target_name: b.target})), 'buff');
+            if (data.nerfs?.length) html += renderSection('🔴 Nerfs', data.nerfs.map(n => ({...n, target_name: n.target})), 'nerf');
+            if (data.item_changes?.length) html += renderSection('🔧 Items', data.item_changes.map(i => ({...i, target_name: i.target})), 'item');
+            if (data.system_changes?.length) html += renderSection('⚙️ System', data.system_changes.map(s => ({...s, target_name: s.target})), 'system');
+            document.getElementById('content').innerHTML = html || '<div class="empty">No significant changes for this role.</div>';
+        }
+
+        function renderSection(title, items, cls) {
+            let html = `<div class="section"><h2>${title}</h2>`;
+            items.forEach(c => {
+                const impact = c.impact_score || c.impact || 0;
+                const impactCls = impact > 0 ? 'positive' : impact < 0 ? 'negative' : 'neutral';
+                const impactLabel = impact > 0 ? `+${impact}` : impact;
+                html += `<div class="change-card ${cls}">
+                    <span class="change-name">${c.target_name || c.champion_name || ''}</span>
+                    ${c.ability ? `<span class="change-ability"> — ${c.ability}</span>` : ''}
+                    ${impact ? `<span class="impact ${impactCls}">${impactLabel}</span>` : ''}
+                    <div class="change-desc">${c.description || ''}</div>
+                </div>`;
+            });
+            return html + '</div>';
+        }
+
+        init();
+    </script>
+</body>
+</html>
