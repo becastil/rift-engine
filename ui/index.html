@@ -29,6 +29,10 @@
         .timeline-box { background: #16213e; border-radius: 8px; padding: 12px; max-height: 400px; overflow-y: auto; }
         .event { padding: 6px 0; border-bottom: 1px solid #222; font-size: 0.9rem; }
         .event .time { color: #4fc3f7; font-weight: bold; min-width: 50px; display: inline-block; }
+        .deep-dive-controls { margin-bottom: 10px; }
+        .deep-dive-controls select { width: 100%; }
+        .event-meta { color: #9fb7cf; font-size: 0.82rem; margin-top: 3px; }
+        .event-reason { color: #c6d8eb; font-size: 0.85rem; margin-top: 3px; line-height: 1.35; }
         canvas { max-height: 300px; margin: 10px 0; }
         .winner-blue { color: #2196f3; }
         .winner-red { color: #f44336; }
@@ -75,6 +79,12 @@
 
         <h2>Event Timeline</h2>
         <div class="timeline-box" id="timeline"></div>
+
+        <h2>Champion Deep Dive</h2>
+        <div class="deep-dive-controls">
+            <select id="champion-report-select"></select>
+        </div>
+        <div class="timeline-box" id="champion-report"></div>
     </div>
 </div>
 
@@ -98,6 +108,15 @@ const defaults = {
 });
 
 let goldChart = null;
+
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
 
 async function runSimulation() {
     const btn = document.getElementById('simulate-btn');
@@ -179,6 +198,52 @@ function showResults(data) {
         .filter(e => e.event_type !== 'STATE_SNAPSHOT')
         .map(e => `<div class="event"><span class="time">${(e.time/60).toFixed(1)}m</span> ${e.description}</div>`)
         .join('');
+
+    renderChampionReports(data);
+}
+
+function renderChampionReports(data) {
+    const reports = data.champion_reports || {};
+    const select = document.getElementById('champion-report-select');
+    const keys = Object.keys(reports);
+
+    if (keys.length === 0) {
+        select.innerHTML = '<option>No report data</option>';
+        document.getElementById('champion-report').innerHTML = '<div class="event">No champion report data available.</div>';
+        return;
+    }
+
+    select.innerHTML = keys.map((k, i) => `<option value="${i}">${escapeHtml(k)}</option>`).join('');
+    select.onchange = () => {
+        const idx = Number(select.value);
+        const key = keys[idx] ?? keys[0];
+        renderSingleChampionReport(reports, key);
+    };
+    select.value = '0';
+    renderSingleChampionReport(reports, keys[0]);
+}
+
+function renderSingleChampionReport(reports, championKey) {
+    const rows = reports[championKey] || [];
+    const box = document.getElementById('champion-report');
+
+    if (rows.length === 0) {
+        box.innerHTML = '<div class="event">No minute-by-minute data for this champion.</div>';
+        return;
+    }
+
+    box.innerHTML = rows.map(r => {
+        const minute = `${Number(r.minute).toFixed(0)}m`;
+        const action = escapeHtml(r.action || 'No action');
+        const reasoning = escapeHtml(r.reasoning || '');
+        const stats = `L${r.level} | KDA ${r.kda} | ${Math.round(r.gold)}g | CS ${r.cs} | Skills ${r.skill_order}`;
+        return `
+            <div class="event">
+                <span class="time">${minute}</span> ${action}
+                <div class="event-meta">${escapeHtml(stats)}</div>
+                <div class="event-reason">${reasoning}</div>
+            </div>`;
+    }).join('');
 }
 </script>
 </body>

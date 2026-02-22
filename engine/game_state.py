@@ -68,6 +68,52 @@ class PlayerState:
     # Calculated combat power (updated each tick based on stats + items + level)
     combat_power: float = 100.0
 
+    # ── Real champion base stats (loaded from Data Dragon via database) ──
+    # These are the level-1 stats for this champion
+    base_stats: dict = field(default_factory=lambda: {
+        "hp": 600, "mp": 300, "movespeed": 335, "armor": 30,
+        "spellblock": 30, "attackrange": 550, "hpregen": 6,
+        "mpregen": 8, "attackdamage": 60, "attackspeed": 0.65,
+    })
+
+    # Per-level growth values (how much each stat goes up per level)
+    stat_growth: dict = field(default_factory=lambda: {
+        "hp": 90, "mp": 40, "armor": 4, "spellblock": 1.5,
+        "hpregen": 0.6, "mpregen": 0.5, "attackdamage": 3, "attackspeed": 0.02,
+    })
+
+    # Resource type: "mana", "energy", or "none"
+    resource_type: str = "mana"
+
+    # Meta info (from U.GG or similar — win rate, matchup data)
+    meta_win_rate: float = 50.0
+    meta_tier: str = ""
+
+    def stat_at_level(self, stat_name: str) -> float:
+        """
+        Calculate a stat's value at the player's current level.
+        League uses a specific growth formula:
+            stat = base + growth * (level - 1) * (0.7025 + 0.0175 * (level - 1))
+        This matches Riot's actual scaling curve (not linear).
+
+        SPECIAL CASE: Attack speed works differently in League.
+        The base_stats 'attackspeed' is the level-1 attacks per second (e.g. 0.625).
+        The growth 'attackspeed' is a PERCENTAGE bonus per level (e.g. 3.5 = +3.5%).
+        So at level 6: AS = 0.625 * (1 + 3.5 * growth_factor / 100)
+        """
+        base = self.base_stats.get(stat_name, 0)
+        growth = self.stat_growth.get(stat_name, 0)
+        lvl = self.level
+
+        # Riot's per-level growth multiplier
+        growth_factor = (lvl - 1) * (0.7025 + 0.0175 * (lvl - 1))
+
+        if stat_name == "attackspeed":
+            # Attack speed growth is a percentage, not flat
+            return base * (1 + growth * growth_factor / 100)
+        else:
+            return base + growth * growth_factor
+
     def is_flash_up(self) -> bool:
         return self.flash_cd <= 0
 

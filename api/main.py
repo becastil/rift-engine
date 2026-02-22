@@ -50,6 +50,7 @@ class SimulationResponse(BaseModel):
     red_kda: dict
     gold_curve: list[dict]
     timeline: list[EventOut]
+    champion_reports: dict[str, list[dict]]
 
 
 # ─── Endpoints ───
@@ -106,4 +107,5 @@ async def run_simulation(request: SimulationRequest):
             EventOut(time=e.time, event_type=e.event_type, description=e.description)
             for e in result.timeline
         ],
+        champion_reports=result.champion_reports,
     )
